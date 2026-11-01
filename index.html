@@ -1,0 +1,1060 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>4次元直方体 3次元断面ビューア</title>
+<style>
+  :root { --bg:#14171c; --panel:#1d2128; --line:#2f3641; --fg:#e6e9ee; --dim:#9aa4b2; --acc:#4da3ff; }
+  * { box-sizing: border-box; }
+  html, body { margin:0; height:100%; background:var(--bg); color:var(--fg);
+    font:14px/1.5 "Segoe UI","Hiragino Sans","Yu Gothic UI",sans-serif; }
+  #app { display:flex; height:100%; }
+  #panel { width:340px; flex:none; background:var(--panel); border-right:1px solid var(--line);
+    padding:14px 16px; overflow-y:auto; }
+  [hidden] { display:none !important; }
+  #view { flex:1; min-width:0; display:flex; gap:2px; background:var(--line); }
+  .pane { position:relative; flex:1; min-width:0; background:var(--bg); }
+  .pane canvas { display:block; width:100%; height:100%; }
+  .tag { position:absolute; left:10px; top:8px; font-size:12px; color:var(--dim); pointer-events:none; z-index:1; }
+  .pane canvas.gizmo { position:absolute; top:8px; right:8px; width:128px; height:128px; pointer-events:none; z-index:1; }
+  input[type=number] { width:100%; background:#2a313b; color:var(--fg); border:1px solid var(--line); border-radius:6px; padding:4px 6px; font:inherit; }
+  input[type=number]:disabled { opacity:.45; }
+  #e-report { white-space:pre-wrap; font:12px/1.5 Consolas,monospace; color:var(--dim); margin:8px 0 0; }
+  .grid2 { display:grid; grid-template-columns:1fr 1fr; gap:8px; }
+  button.active { background:var(--acc); color:#06121f; border-color:var(--acc); }
+  select { width:100%; background:#2a313b; color:var(--fg); border:1px solid var(--line); border-radius:6px; padding:5px; font:inherit; }
+  h1 { font-size:16px; margin:0 0 4px; }
+  h2 { font-size:12px; letter-spacing:.08em; color:var(--dim); margin:16px 0 6px; text-transform:uppercase; }
+  .note { color:var(--dim); font-size:12px; }
+  .row { margin:8px 0; }
+  .row label { display:flex; justify-content:space-between; }
+  .row output { font-variant-numeric:tabular-nums; color:var(--acc); }
+  input[type=range] { width:100%; accent-color:var(--acc); }
+  button { background:#2a313b; color:var(--fg); border:1px solid var(--line); border-radius:6px;
+    padding:6px 12px; cursor:pointer; font:inherit; }
+  button:hover { background:#343c48; }
+  .btns { display:flex; gap:8px; flex-wrap:wrap; }
+  .chk { display:flex; gap:8px; align-items:center; margin:4px 0; }
+  table { width:100%; border-collapse:collapse; font-variant-numeric:tabular-nums; }
+  td { padding:2px 0; } td:last-child { text-align:right; color:var(--acc); }
+  .legend { display:grid; grid-template-columns:1fr 1fr; gap:2px 8px; font-size:12px; }
+  .sw { display:inline-block; width:10px; height:10px; border-radius:2px; margin-right:6px; }
+  #empty { position:absolute; inset:0; display:none; align-items:center; justify-content:center;
+    pointer-events:none; text-align:center; font-size:18px; color:#ffb4a8; padding:20px; }
+</style>
+</head>
+<body>
+<div id="app">
+  <aside id="panel">
+    <h1>4次元直方体の3次元断面</h1>
+    <div class="note">|x|≤a, |y|≤b, |z|≤c, |w|≤d（a=b=c=d=1 でテッセラクト）を4次元回転し、超平面 w = w₀ で切った断面</div>
+
+    <h2>表示モード</h2>
+    <div class="btns">
+      <button id="m-slice">Slice</button>
+      <button id="m-proj">Projection</button>
+      <button id="m-cmp">Comparison</button>
+    </div>
+    <div class="note" id="mode-note"></div>
+
+    <h2 id="h-w">断面位置</h2>
+    <div class="row" id="row-w"><label>w₀ <output id="o-w"></output></label>
+      <input id="s-w" type="range" min="-2" max="2" step="any" value="0"></div>
+    <div class="btns">
+      <button id="b-play">▶ 自動往復</button>
+      <button id="b-reset">リセット</button>
+    </div>
+    <div class="row" id="row-speed"><label>往復速度 (w/秒) <output id="o-speed"></output></label>
+      <input id="s-speed" type="range" min="0.05" max="2" step="0.05" value="0.5"></div>
+
+    <h2>形状</h2>
+    <div class="btns">
+      <button id="b-tess">Tesseract</button>
+      <button id="b-orth">Orthotope</button>
+    </div>
+    <div class="row"><label>X方向の半幅 a <output id="o-ha"></output></label>
+      <input id="s-ha" type="range" min="0.2" max="2" step="0.01" value="1.2"></div>
+    <div class="row"><label>Y方向の半幅 b <output id="o-hb"></output></label>
+      <input id="s-hb" type="range" min="0.2" max="2" step="0.01" value="0.8"></div>
+    <div class="row"><label>Z方向の半幅 c <output id="o-hc"></output></label>
+      <input id="s-hc" type="range" min="0.2" max="2" step="0.01" value="1.5"></div>
+    <div class="row"><label>W方向の半幅 d <output id="o-hd"></output></label>
+      <input id="s-hd" type="range" min="0.2" max="2" step="0.01" value="0.6"></div>
+
+    <h2>4次元回転</h2>
+    <div class="row"><label>XW回転 <output id="o-xw"></output></label>
+      <input id="s-xw" type="range" min="-180" max="180" step="1" value="0"></div>
+    <div class="row"><label>YW回転 <output id="o-yw"></output></label>
+      <input id="s-yw" type="range" min="-180" max="180" step="1" value="0"></div>
+    <div class="row"><label>ZW回転 <output id="o-zw"></output></label>
+      <input id="s-zw" type="range" min="-180" max="180" step="1" value="0"></div>
+    <div class="btns"><button id="b-norot">回転なし (0°)</button>
+      <label class="chk" style="margin:0"><input id="c-rotanim" type="checkbox"> 4D回転を自動アニメーション</label></div>
+    <div class="row"><label>回転速度 (°/秒) <output id="o-rotspeed"></output></label>
+      <input id="s-rotspeed" type="range" min="1" max="90" step="1" value="20"></div>
+    <div class="note">合成順序: R = R<sub>ZW</sub> · R<sub>YW</sub> · R<sub>XW</sub><br>
+      （頂点 p に XW → YW → ZW の順で適用: p′ = R p）<br>
+      ※ マウスによる視点回転は3Dカメラのみで、4次元回転とは独立です。</div>
+
+    <h2>3D → 2D Camera Projection</h2>
+    <div class="row"><label>3Dカメラの投影方式</label>
+      <select id="s-ctype"><option value="persp">Perspective（透視）</option><option value="ortho">Orthographic（正射影）</option></select></div>
+
+    <div id="sec-proj" hidden>
+      <h2>4D → 3D Projection</h2>
+      <div class="row"><label>4D→3D 投影方式</label>
+        <select id="s-ptype"><option value="persp">透視投影 s = D/(D−w′)</option><option value="ortho">直交投影 (x′,y′,z′)</option></select></div>
+      <div class="row" id="row-D"><label>4次元視点距離 D <output id="o-D"></output></label>
+        <input id="s-D" type="range" min="2.5" max="12" step="0.01" value="4"></div>
+      <label class="chk"><input id="c-verts" type="checkbox" checked> 頂点（小球）を表示</label>
+      <label class="chk"><input id="c-ecol" type="checkbox" checked> 辺の色分け</label>
+      <div class="legend">
+        <div><span class="sw" style="background:#4da3ff"></span>w=+d の12辺</div>
+        <div><span class="sw" style="background:#ff9a3c"></span>w=−d の12辺</div>
+        <div><span class="sw" style="background:#9aa0a6"></span>連結する8辺</div>
+        <div><span class="sw" style="background:#3ddc84"></span>断面（Comparison）</div>
+      </div>
+    </div>
+
+    <h2>表示</h2>
+    <label class="chk"><input id="c-cell" type="checkbox" checked> 立方体胞ごとの色分け</label>
+    <label class="chk"><input id="c-edge" type="checkbox" checked> 面の境界線</label>
+    <label class="chk"><input id="c-wire" type="checkbox"> ワイヤーフレーム（三角形分割）</label>
+    <div class="legend" id="legend" style="margin-top:6px"></div>
+
+    <h2>STL エクスポート（3Dプリント）</h2>
+    <div class="row"><label>出力対象</label>
+      <select id="s-etarget"><option value="slice">Slice（断面ソリッド）</option><option value="proj">Projection（球＋ロッドの模型）</option></select></div>
+    <div class="grid2">
+      <div><div class="note">造形サイズ [mm]</div><input id="n-size" type="number" min="10" max="500" step="1" value="100"></div>
+      <div><div class="note">ロッド直径 [mm]</div><input id="n-rod" type="number" min="0.4" max="20" step="0.1" value="3"></div>
+      <div><div class="note">ジョイント直径 [mm]</div><input id="n-joint" type="number" min="0.4" max="30" step="0.1" value="4"></div>
+    </div>
+    <div class="btns" style="margin-top:8px">
+      <button id="b-preview">印刷用プレビュー</button>
+      <button id="b-export">Export STL</button>
+      <button id="b-pclose">プレビューを閉じる</button>
+    </div>
+    <div class="note">造形サイズ = モデル全体の最大外形。Slice は断面の最大辺、Projection は球・ロッド径を含む外形。</div>
+    <pre id="e-report"></pre>
+
+    <div id="info-proj" hidden><h2>投影の情報</h2>
+    <table>
+      <tr><td>頂点数 / 辺数</td><td>16 / 32</td></tr>
+      <tr><td>4D→3D 投影方式</td><td id="p-type"></td></tr>
+      <tr><td>視点距離 D</td><td id="p-D"></td></tr>
+      <tr><td>回転後 w′ の範囲</td><td id="p-w"></td></tr>
+    </table></div>
+    <div id="info-slice"><h2>断面の情報</h2>
+    <table>
+      <tr><td>w</td><td id="i-w"></td></tr>
+      <tr><td>XW / YW / ZW 角</td><td id="i-ang"></td></tr>
+      <tr><td>頂点数</td><td id="i-v"></td></tr>
+      <tr><td>辺数</td><td id="i-e"></td></tr>
+      <tr><td>面数（多角形）</td><td id="i-f"></td></tr>
+      <tr><td>体積</td><td id="i-vol"></td></tr>
+      <tr><td>状態</td><td id="i-st"></td></tr>
+    </table></div>
+    <div class="note" style="margin-top:8px">座標軸: <span style="color:#f55">X</span> / <span style="color:#5d5">Y</span> / <span style="color:#58f">Z</span></div>
+  </aside>
+  <main id="view">
+    <div class="pane" id="pane-proj" hidden><span class="tag">Projection（4D→3D 投影）</span></div>
+    <div class="pane" id="pane-print" hidden><span class="tag">印刷用モデル プレビュー（mm・単一メッシュ）</span></div>
+    <div class="pane" id="pane-slice"><span class="tag">Slice（w = w₀ の3D断面）</span><div id="empty"></div></div>
+  </main>
+</div>
+
+<script type="importmap">
+{ "imports": {
+  "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+  "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+} }
+</script>
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { ViewHelper } from 'three/addons/helpers/ViewHelper.js';
+
+/* =====================================================================
+ *  幾何計算（Three.js 非依存）
+ * ===================================================================== */
+const EPS = 1e-9;       // 退化判定の許容誤差
+const MERGE = 1e-7;     // 頂点・平面の同一視許容誤差
+
+const dot3 = (a, b) => a[0]*b[0] + a[1]*b[1] + a[2]*b[2];
+const sub3 = (a, b) => [a[0]-b[0], a[1]-b[1], a[2]-b[2]];
+const cross3 = (a, b) => [a[1]*b[2]-a[2]*b[1], a[2]*b[0]-a[0]*b[2], a[0]*b[1]-a[1]*b[0]];
+const len3 = a => Math.hypot(a[0], a[1], a[2]);
+
+/** 回転後の16頂点の W 座標の最大値（頂点は ±H なので ±Σ|R[3][k]|·H[k]、最小値は符号反転） */
+function wExtent(R, H) {
+  return R[3].reduce((acc, r, k) => acc + Math.abs(r) * H[k], 0);
+}
+
+/** 4x4 行列の積 */
+function mul4(A, B) {
+  const C = Array.from({length:4}, () => [0,0,0,0]);
+  for (let i = 0; i < 4; i++) for (let j = 0; j < 4; j++)
+    for (let k = 0; k < 4; k++) C[i][j] += A[i][k] * B[k][j];
+  return C;
+}
+/** 座標軸 i,j の張る平面での角度 θ の回転行列 */
+function planeRotation(i, j, theta) {
+  const M = [[1,0,0,0],[0,1,0,0],[0,0,1,0],[0,0,0,1]];
+  const c = Math.cos(theta), s = Math.sin(theta);
+  M[i][i] = c; M[i][j] = -s; M[j][i] = s; M[j][j] = c;
+  return M;
+}
+/** R = R_ZW · R_YW · R_XW（角度はラジアン）。座標軸 x,y,z,w = 0,1,2,3 */
+function rotationMatrix(xw, yw, zw) {
+  return mul4(planeRotation(2,3,zw), mul4(planeRotation(1,3,yw), planeRotation(0,3,xw)));
+}
+
+/** 凸多角形を半空間 {q : u·q - h <= 0} で切り取る（Sutherland–Hodgman） */
+function clipPolygon(poly, u, h) {
+  const d = poly.map(p => dot3(u, p) - h);
+  const out = [];
+  const n = poly.length;
+  const cut = (i, j) => {                       // 辺 i→j と境界平面との交点
+    const t = d[i] / (d[i] - d[j]);
+    return [poly[i][0]+(poly[j][0]-poly[i][0])*t,
+            poly[i][1]+(poly[j][1]-poly[i][1])*t,
+            poly[i][2]+(poly[j][2]-poly[i][2])*t];
+  };
+  for (let i = 0; i < n; i++) {
+    const p = (i + n - 1) % n;
+    const inCur = d[i] <= EPS, inPrev = d[p] <= EPS;
+    if (inCur) { if (!inPrev) out.push(cut(p, i)); out.push(poly[i]); }
+    else if (inPrev) out.push(cut(p, i));
+  }
+  return out;
+}
+
+/** 重複点・共線点を除去（ゼロ面積三角形の原因を断つ） */
+function cleanPolygon(poly) {
+  let pts = poly;
+  for (let pass = 0; pass < 3; pass++) {
+    const a = [];
+    for (const p of pts) {
+      if (!a.length || len3(sub3(p, a[a.length-1])) > MERGE) a.push(p);
+    }
+    while (a.length > 1 && len3(sub3(a[0], a[a.length-1])) <= MERGE) a.pop();
+    const b = [];
+    for (let i = 0; i < a.length; i++) {
+      const p0 = a[(i+a.length-1)%a.length], p1 = a[i], p2 = a[(i+1)%a.length];
+      if (len3(cross3(sub3(p1,p0), sub3(p2,p1))) > 1e-9) b.push(p1);   // 共線なら p1 を落とす
+    }
+    pts = b;
+    if (pts.length < 3) return [];
+  }
+  return pts;
+}
+
+/**
+ * 回転 R を施したテッセラクトと超平面 w=w0 の3次元断面を求める。
+ *
+ * 回転後の立体は { p : |(R e_k)·p| <= H[k], k=0..3 }（H=半幅 a,b,c,d）（8枚の胞の半空間の共通部分）。
+ * p=(x,y,z,w0) を代入すると、各胞 n=(a,nw) は3次元の半空間 a·q <= 1 - nw·w0 になる。
+ * 断面は8個以下の半空間の共通部分＝凸多面体で、各半空間の境界平面上の多角形が面になる。
+ * 面は「境界平面を大きな正方形で表し、他の半空間で順に切り取る」ことで正確に得る。
+ *  - a≈0 の胞（切断平面と平行）は制約が 0 <= b だけになる（b<0 なら断面は空）。
+ *  - 同一平面になる複数の胞（例: XW回転45°,w=0）は1つの面に統合する。
+ */
+function computeSection(R, w0, H = [1,1,1,1]) {
+  const result = { empty: true, reason: '', faces: [], vertices: [], edges: 0, volume: 0 };
+  const planes = [];
+  for (let k = 0; k < 4; k++) for (const s of [1, -1]) {
+    const cell = k * 2 + (s > 0 ? 0 : 1);               // 0:+x 1:-x 2:+y 3:-y 4:+z 5:-z 6:+w 7:-w
+    const a = [s*R[0][k], s*R[1][k], s*R[2][k]];
+    const b = H[k] - s*R[3][k] * w0;          // 半幅 H[k] の胞: n·p <= H[k]
+    const len = len3(a);
+    if (len < EPS) {                                    // 胞が切断平面と平行
+      if (b < -EPS) { result.reason = '断面は空です（切断平面が立体の外側にあります）'; return result; }
+      continue;                                         // 常に満たされる（または平面と一致）
+    }
+    planes.push({ cell, u: [a[0]/len, a[1]/len, a[2]/len], h: b/len });
+  }
+
+  // 同一平面の統合（最初に現れた胞を代表とする）
+  const reps = [];
+  for (const p of planes) {
+    if (!reps.some(r => len3(sub3(r.u, p.u)) < MERGE && Math.abs(r.h - p.h) < MERGE)) reps.push(p);
+  }
+
+  // 各代表平面について多角形を作る
+  const faces = [];
+  for (const f of reps) {
+    const ref = Math.abs(f.u[0]) < 0.9 ? [1,0,0] : [0,1,0];
+    let e1 = cross3(f.u, ref); const l = len3(e1); e1 = e1.map(v => v/l);
+    const e2 = cross3(f.u, e1);                          // e1×e2 = u なので反時計回り＝外向き法線
+    const c = f.u.map(v => v * f.h), L = 20;
+    const P = (s, t) => [c[0]+L*(s*e1[0]+t*e2[0]), c[1]+L*(s*e1[1]+t*e2[1]), c[2]+L*(s*e1[2]+t*e2[2])];
+    let poly = [P(-1,-1), P(1,-1), P(1,1), P(-1,1)];
+    for (const g of reps) {
+      if (g === f) continue;
+      poly = clipPolygon(poly, g.u, g.h);
+      if (poly.length < 3) break;
+    }
+    if (poly.length < 3) continue;
+    poly = cleanPolygon(poly);
+    if (poly.length < 3) continue;
+    // 面積（外向き法線方向）
+    let acc = [0,0,0];
+    for (let i = 0; i < poly.length; i++) {
+      const cr = cross3(poly[i], poly[(i+1)%poly.length]);
+      acc = [acc[0]+cr[0], acc[1]+cr[1], acc[2]+cr[2]];
+    }
+    const area = dot3(acc, f.u) / 2;
+    if (area < 1e-9) continue;                           // ゼロ面積（頂点・辺での接触）は捨てる
+    faces.push({ cell: f.cell, u: f.u, h: f.h, pts: poly, area });
+  }
+
+  // 体積 = Σ (1/3)·h·面積 （原点が外にあっても符号付きで正しい）
+  let vol = 0;
+  for (const f of faces) vol += f.h * f.area / 3;
+  if (faces.length < 4 || vol < 1e-9) {
+    result.reason = '断面は空です（切断平面が頂点・辺・面で接するだけで体積0）';
+    return result;
+  }
+
+  // 頂点の統合と辺数
+  const verts = [];
+  const idx = p => {
+    for (let i = 0; i < verts.length; i++) if (len3(sub3(verts[i], p)) < 1e-6) return i;
+    verts.push(p); return verts.length - 1;
+  };
+  const edgeSet = new Set();
+  for (const f of faces) {
+    f.idx = f.pts.map(idx);
+    for (let i = 0; i < f.idx.length; i++) {
+      const a = f.idx[i], b = f.idx[(i+1) % f.idx.length];
+      if (a !== b) edgeSet.add(a < b ? a+','+b : b+','+a);
+    }
+  }
+  return { empty: false, reason: '', faces, vertices: verts, edges: edgeSet.size, volume: vol };
+}
+
+/** 検証用: 32辺と w=w0 の交点（推奨アルゴリズムの頂点生成）の個数 */
+function edgeIntersectionCount(R, w0, H = [1,1,1,1]) {
+  const V = [];
+  for (let m = 0; m < 16; m++) {
+    const v = [0,1,2,3].map(k => (m >> k & 1) ? H[k] : -H[k]);
+    V.push([0,1,2,3].map(i => R[i][0]*v[0] + R[i][1]*v[1] + R[i][2]*v[2] + R[i][3]*v[3]));
+  }
+  const pts = [];
+  const add = p => { if (!pts.some(q => len3(sub3(q, p)) < 1e-6)) pts.push(p); };
+  for (let m = 0; m < 16; m++) for (let k = 0; k < 4; k++) {
+    if (m >> k & 1) continue;
+    const A = V[m], B = V[m | (1 << k)];
+    const da = A[3] - w0, db = B[3] - w0;
+    if (Math.abs(da) < 1e-9) add(A.slice(0,3));
+    if (Math.abs(db) < 1e-9) add(B.slice(0,3));
+    if (da * db < 0) {
+      const t = da / (da - db);
+      add([0,1,2].map(i => A[i] + (B[i]-A[i]) * t));
+    }
+  }
+  return pts.length;
+}
+
+/* ---------- 4D 投影（Slice と共通の回転行列 R を使う） ---------- */
+
+/** 4D直方体の16頂点（ビット k が立てば +H[k]、そうでなければ −H[k]。ビット3が w の符号） */
+function boxVertices(H) {
+  const V = [];
+  for (let m = 0; m < 16; m++) V.push([0,1,2,3].map(k => (m >> k & 1) ? H[k] : -H[k]));
+  return V;
+}
+/** 32辺: 符号がちょうど1座標だけ異なる頂点対。kind は回転前の w で分類 */
+function boxEdges() {
+  const E = [];
+  for (let m = 0; m < 16; m++) for (let k = 0; k < 4; k++) {
+    if (m >> k & 1) continue;
+    E.push({ i: m, j: m | (1 << k), kind: k === 3 ? 'link' : (m >> 3 & 1) ? 'plus' : 'minus' });
+  }
+  return E;
+}
+const rotate4 = (R, v) => [0,1,2,3].map(i => R[i][0]*v[0] + R[i][1]*v[1] + R[i][2]*v[2] + R[i][3]*v[3]);
+/** 4D→3D 投影。透視: s = D/(D−w′)、直交: w′ を捨てる（3Dカメラの透視とは別物） */
+function project4D(p, D, persp) {
+  if (!persp) return [p[0], p[1], p[2]];
+  const s = D / Math.max(D - p[3], 1e-3);
+  return [s*p[0], s*p[1], s*p[2]];
+}
+
+/* =====================================================================
+ *  3Dプリント用メッシュ生成・検証・STL書き出し（Three.js 非依存）
+ *  メッシュ = { pos: Float64Array(mm, アプリ座標系 Y-up, bbox中心が原点), idx: Uint32Array(外向きCCW) }
+ * ===================================================================== */
+
+/** 位置配列を bbox の最大辺が size になるよう拡大し、bbox 中心を原点に移す */
+function fitToSize(pos, size, offset = 0) {
+  const lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity];
+  for (let i = 0; i < pos.length; i += 3) for (let k = 0; k < 3; k++) {
+    lo[k] = Math.min(lo[k], pos[i+k]); hi[k] = Math.max(hi[k], pos[i+k]);
+  }
+  const ext = Math.max(hi[0]-lo[0], hi[1]-lo[1], hi[2]-lo[2]);
+  const s = (size - offset) / ext;
+  for (let i = 0; i < pos.length; i += 3) for (let k = 0; k < 3; k++) pos[i+k] = (pos[i+k] - (lo[k]+hi[k])/2) * s;
+  return s;
+}
+
+/**
+ * Slice の3次元断面 → 閉じた三角形メッシュ。
+ * 断面は凸多面体で、computeSection が統合済みの頂点IDを各面に持たせているため、
+ * 隣接面は頂点を共有する（＝水密）。各面は外向き法線に対して反時計回りなので、扇形分割でも向きが揃う。
+ */
+function buildSliceMesh(section, sizeMM) {
+  if (section.empty) throw new Error('断面が空のため出力できません');
+  const pos = new Float64Array(section.vertices.length * 3);
+  section.vertices.forEach((v, i) => pos.set(v, i * 3));
+  const idx = [];
+  for (const f of section.faces) {
+    const ring = f.idx.filter((v, i) => v !== f.idx[(i + 1) % f.idx.length]);   // 連続重複を除去
+    for (let i = 1; i < ring.length - 1; i++) idx.push(ring[0], ring[i], ring[i+1]);
+  }
+  fitToSize(pos, sizeMM);
+  return { pos, idx: Uint32Array.from(idx), info: {} };
+}
+
+/**
+ * Projection のワイヤーフレーム → 単一の水密メッシュ。
+ * 辺はカプセル（円柱ロッド＋端の半球）、頂点は球ジョイントとして、全部材の符号付き距離場（SDF）の
+ * 和集合 min(d_i) を格子上に作り、Marching Tetrahedra で等値面(=0)を抽出する。
+ * 部材の重なり・交差は SDF の min で自動的に結合され、四面体分割は面の対角線が隣接セルと一致する
+ * Kuhn 分割なので、すべての辺がちょうど2枚の三角形に共有される（ひび割れが生じない）。
+ * @param P  投影済み16頂点（3Dカメラとは無関係）  @param edges 32辺 {i,j}
+ */
+function buildProjectionMesh(P, edges, sizeMM, rodD, jointD) {
+  const rodR = rodD / 2, jointR = jointD / 2, rmax = Math.max(rodR, jointR);
+  if (!(sizeMM > 2 * rmax)) throw new Error('造形サイズは太い方の直径より大きくしてください');
+  // 頂点中心を、モデル全体（球・ロッド径込み）の外形が sizeMM になるよう拡縮
+  const C = new Float64Array(48);
+  P.forEach((p, i) => C.set(p, i * 3));
+  const s = fitToSize(C, sizeMM, 2 * rmax);
+  if (!isFinite(s) || s <= 0) throw new Error('投影形状が点に縮退しています');
+  const h = Math.max(Math.min(rodD, jointD) / 5, sizeMM / 220);   // ボクセル幅 [mm]
+  const band = rmax + 2.5 * h;
+  const lo = [0,1,2].map(k => Math.min(...P.map((_, i) => C[i*3+k])) - band);
+  const hi = [0,1,2].map(k => Math.max(...P.map((_, i) => C[i*3+k])) + band);
+  const n = [0,1,2].map(k => Math.ceil((hi[k] - lo[k]) / h) + 1);
+  const [nx, ny, nz] = n, ntot = nx * ny * nz;
+  const F = new Float32Array(ntot).fill(1e3);                     // 帯の外は「外側」
+
+  // 部材ごとに、軸線の近傍の格子点だけ距離を更新（帯の外は未更新＝大きな正値）
+  const stamp = (a, b, r) => {
+    const ab = [b[0]-a[0], b[1]-a[1], b[2]-a[2]];
+    const L2 = ab[0]*ab[0] + ab[1]*ab[1] + ab[2]*ab[2], L = Math.sqrt(L2);
+    const k = Math.ceil((r + 2 * h) / h) + 1;
+    const steps = Math.max(1, Math.ceil(L / h));
+    for (let st = 0; st <= steps; st++) {
+      const t0 = st / steps;
+      const c = [a[0]+ab[0]*t0, a[1]+ab[1]*t0, a[2]+ab[2]*t0];
+      const cx = Math.round((c[0]-lo[0])/h), cy = Math.round((c[1]-lo[1])/h), cz = Math.round((c[2]-lo[2])/h);
+      for (let iz = Math.max(0, cz-k); iz <= Math.min(nz-1, cz+k); iz++)
+      for (let iy = Math.max(0, cy-k); iy <= Math.min(ny-1, cy+k); iy++)
+      for (let ix = Math.max(0, cx-k); ix <= Math.min(nx-1, cx+k); ix++) {
+        const px = lo[0]+ix*h, py = lo[1]+iy*h, pz = lo[2]+iz*h;
+        let t = L2 > 1e-12 ? ((px-a[0])*ab[0] + (py-a[1])*ab[1] + (pz-a[2])*ab[2]) / L2 : 0;
+        t = t < 0 ? 0 : t > 1 ? 1 : t;
+        const dx = px-a[0]-ab[0]*t, dy = py-a[1]-ab[1]*t, dz = pz-a[2]-ab[2]*t;
+        const d = Math.sqrt(dx*dx + dy*dy + dz*dz) - r;
+        const gi = ix + nx*(iy + ny*iz);
+        if (d < F[gi]) F[gi] = d;
+      }
+    }
+  };
+  const ctr = i => [C[i*3], C[i*3+1], C[i*3+2]];
+  for (const e of edges) stamp(ctr(e.i), ctr(e.j), rodR);          // ロッド
+  for (let i = 0; i < 16; i++) stamp(ctr(i), ctr(i), jointR);      // 球ジョイント
+  // ちょうど0の値は、頂点を通る退化三角形の原因になるので外側へ僅かにずらす
+  for (let i = 0; i < ntot; i++) if (F[i] === 0) F[i] = 1e-6;
+
+  // ---- Marching Tetrahedra（Kuhn 分割: 立方体の対角線 0→7 を共有する6四面体） ----
+  const off = c => [c & 1, (c >> 1) & 1, (c >> 2) & 1];
+  const TETS = [[0,1,3,7],[0,1,5,7],[0,2,3,7],[0,2,6,7],[0,4,5,7],[0,4,6,7]];
+  const inv3 = m => {                                             // 3x3 逆行列（勾配の向き判定用）
+    const [a,b,c,d,e,f,g,hh,i] = m.flat();
+    const det = a*(e*i-f*hh) - b*(d*i-f*g) + c*(d*hh-e*g);
+    return [[(e*i-f*hh)/det,(c*hh-b*i)/det,(b*f-c*e)/det],[(f*g-d*i)/det,(a*i-c*g)/det,(c*d-a*f)/det],[(d*hh-e*g)/det,(b*g-a*hh)/det,(a*e-b*d)/det]];
+  };
+  const TINV = TETS.map(t => {
+    const o0 = off(t[0]);
+    return inv3([1,2,3].map(q => off(t[q]).map((v, k) => v - o0[k])));
+  });
+  const cornerGi = [0, 1, nx, 1 + nx, nx*ny, 1 + nx*ny, nx + nx*ny, 1 + nx + nx*ny];
+  const vpos = [], tri = [];
+  const vmap = new Map();
+  const edgeVertex = (ga, gb) => {                                // 格子の辺ごとに1頂点（隣接四面体で共有）
+    if (ga > gb) { const t = ga; ga = gb; gb = t; }
+    const key = ga * ntot + gb;
+    let id = vmap.get(key);
+    if (id !== undefined) return id;
+    const fa = F[ga], fb = F[gb];
+    let t = fa / (fa - fb);
+    t = t < 0.02 ? 0.02 : t > 0.98 ? 0.98 : t;                    // 頂点近傍の極小三角形を避ける
+    const pa = [ga % nx, Math.floor(ga / nx) % ny, Math.floor(ga / (nx*ny))];
+    const pb = [gb % nx, Math.floor(gb / nx) % ny, Math.floor(gb / (nx*ny))];
+    id = vpos.length / 3;
+    for (let k = 0; k < 3; k++) vpos.push(lo[k] + h * (pa[k] + (pb[k] - pa[k]) * t));
+    vmap.set(key, id);
+    return id;
+  };
+  const g = [0,0,0];
+  for (let iz = 0; iz < nz - 1; iz++) for (let iy = 0; iy < ny - 1; iy++) for (let ix = 0; ix < nx - 1; ix++) {
+    const g0 = ix + nx*(iy + ny*iz);
+    let neg = 0, pos = 0;
+    for (let c = 0; c < 8; c++) { if (F[g0 + cornerGi[c]] < 0) neg++; else pos++; }
+    if (neg === 0 || pos === 0) continue;
+    for (let ti = 0; ti < 6; ti++) {
+      const T = TETS[ti], gv = T.map(c => g0 + cornerGi[c]), fv = gv.map(q => F[q]);
+      const ins = [], out = [];
+      for (let q = 0; q < 4; q++) (fv[q] < 0 ? ins : out).push(q);
+      if (ins.length === 0 || ins.length === 4) continue;
+      const cr = (p, q) => edgeVertex(gv[p], gv[q]);
+      const tris = [];
+      if (ins.length === 1) tris.push([cr(ins[0], out[0]), cr(ins[0], out[1]), cr(ins[0], out[2])]);
+      else if (ins.length === 3) tris.push([cr(out[0], ins[0]), cr(out[0], ins[1]), cr(out[0], ins[2])]);
+      else {
+        const v1 = cr(ins[0], out[0]), v2 = cr(ins[0], out[1]), v3 = cr(ins[1], out[1]), v4 = cr(ins[1], out[0]);
+        tris.push([v1, v2, v3], [v1, v3, v4]);
+      }
+      // 向き: 三角形の法線を、四面体内で線形な場 F の勾配（=外向き）に揃える
+      const d = [fv[1]-fv[0], fv[2]-fv[0], fv[3]-fv[0]], M = TINV[ti];
+      for (let k = 0; k < 3; k++) g[k] = M[k][0]*d[0] + M[k][1]*d[1] + M[k][2]*d[2];
+      for (const [a, b, c] of tris) {
+        const ux = vpos[b*3]-vpos[a*3], uy = vpos[b*3+1]-vpos[a*3+1], uz = vpos[b*3+2]-vpos[a*3+2];
+        const wx = vpos[c*3]-vpos[a*3], wy = vpos[c*3+1]-vpos[a*3+1], wz = vpos[c*3+2]-vpos[a*3+2];
+        const nrm = (uy*wz-uz*wy)*g[0] + (uz*wx-ux*wz)*g[1] + (ux*wy-uy*wx)*g[2];
+        if (nrm >= 0) tri.push(a, b, c); else tri.push(a, c, b);
+      }
+    }
+  }
+  const info = { voxel: h, grid: n, warn: [] };
+  if (h > Math.min(rodD, jointD) / 3) info.warn.push(`ボクセル幅 ${h.toFixed(2)}mm に対してロッド/ジョイントが細いため、形状が粗くなります`);
+  return { pos: Float64Array.from(vpos), idx: Uint32Array.from(tri), info };
+}
+
+/**
+ * 水密性・退化三角形などの検証。
+ *  - 境界辺（1枚だけの辺）、非多様体辺（3枚以上）、向き不整合（同方向の辺が2枚）
+ *  - 頂点の多様体性（頂点周りの三角形が1つの扇になっているか）
+ *  - 退化三角形（面積≈0）、重複三角形、符号付き体積（正＝外向き）、連結成分数、オイラー数
+ */
+function validateMesh(pos, idx) {
+  const nV = pos.length / 3, nF = idx.length / 3;
+  const errors = [], warnings = [];
+  const edgeMap = new Map(), triSeen = new Set();
+  let degenerate = 0, duplicate = 0, volume = 0;
+  const lo = [Infinity,Infinity,Infinity], hi = [-Infinity,-Infinity,-Infinity];
+  for (let i = 0; i < pos.length; i += 3) for (let k = 0; k < 3; k++) { lo[k] = Math.min(lo[k], pos[i+k]); hi[k] = Math.max(hi[k], pos[i+k]); }
+  const used = new Uint8Array(nV);
+  for (let f = 0; f < nF; f++) {
+    const a = idx[f*3], b = idx[f*3+1], c = idx[f*3+2];
+    used[a] = used[b] = used[c] = 1;
+    const ax = pos[a*3], ay = pos[a*3+1], az = pos[a*3+2];
+    const ux = pos[b*3]-ax, uy = pos[b*3+1]-ay, uz = pos[b*3+2]-az;
+    const wx = pos[c*3]-ax, wy = pos[c*3+1]-ay, wz = pos[c*3+2]-az;
+    const cx = uy*wz-uz*wy, cy = uz*wx-ux*wz, cz = ux*wy-uy*wx;
+    if (Math.hypot(cx, cy, cz) / 2 < 1e-9 || a === b || b === c || a === c) degenerate++;
+    volume += (ax*cx + ay*cy + az*cz) / 6;
+    const s = [a, b, c].sort((p, q) => p - q).join(',');
+    if (triSeen.has(s)) duplicate++; else triSeen.add(s);
+    for (const [p, q] of [[a, b], [b, c], [c, a]]) {
+      const key = Math.min(p, q) * nV + Math.max(p, q);
+      let e = edgeMap.get(key); if (!e) edgeMap.set(key, e = [0, 0]);
+      e[p < q ? 0 : 1]++;
+    }
+  }
+  let boundary = 0, nonManifold = 0, inconsistent = 0;
+  for (const e of edgeMap.values()) {
+    const t = e[0] + e[1];
+    if (t === 1) boundary++; else if (t > 2) nonManifold++; else if (e[0] !== 1) inconsistent++;
+  }
+  // 連結成分
+  const parent = Int32Array.from({ length: nV }, (_, i) => i);
+  const find = x => { while (parent[x] !== x) { parent[x] = parent[parent[x]]; x = parent[x]; } return x; };
+  for (let f = 0; f < nF; f++) { const r = find(idx[f*3]); for (let k = 1; k < 3; k++) parent[find(idx[f*3+k])] = r; }
+  const comps = new Set(); let usedV = 0;
+  for (let v = 0; v < nV; v++) if (used[v]) { usedV++; comps.add(find(v)); }
+  // 頂点の多様体性: 各頂点の周囲の三角形が辺で連結な1つの扇か
+  const start = new Int32Array(nV + 1);
+  for (let f = 0; f < nF * 3; f++) start[idx[f] + 1]++;
+  for (let v = 0; v < nV; v++) start[v+1] += start[v];
+  const fill = start.slice(0, nV), inc = new Int32Array(nF * 3);
+  for (let f = 0; f < nF; f++) for (let k = 0; k < 3; k++) inc[fill[idx[f*3+k]]++] = f;
+  let nonManifoldVerts = 0;
+  for (let v = 0; v < nV; v++) {
+    const m = start[v+1] - start[v];
+    if (m < 2) continue;
+    const par = Array.from({ length: m }, (_, i) => i);
+    const fd = x => { while (par[x] !== x) x = par[x] = par[par[x]]; return x; };
+    const seen = new Map();
+    for (let q = 0; q < m; q++) {
+      const f = inc[start[v] + q];
+      for (let k = 0; k < 3; k++) {
+        const o = idx[f*3+k]; if (o === v) continue;
+        if (seen.has(o)) par[fd(q)] = fd(seen.get(o)); else seen.set(o, q);
+      }
+    }
+    let groups = 0; for (let q = 0; q < m; q++) if (fd(q) === q) groups++;
+    if (groups > 1) nonManifoldVerts++;
+  }
+  if (nF === 0) errors.push('三角形がありません');
+  if (boundary) errors.push(`境界辺（穴）が ${boundary} 本あります`);
+  if (nonManifold) errors.push(`非多様体辺が ${nonManifold} 本あります`);
+  if (inconsistent) errors.push(`向きが不整合な辺が ${inconsistent} 本あります`);
+  if (nonManifoldVerts) errors.push(`非多様体頂点が ${nonManifoldVerts} 個あります`);
+  if (degenerate) errors.push(`退化三角形が ${degenerate} 枚あります`);
+  if (duplicate) errors.push(`重複三角形が ${duplicate} 枚あります`);
+  if (!(volume > 0)) errors.push('符号付き体積が正ではありません（法線が内向き）');
+  if (comps.size > 1) warnings.push(`独立した部品が ${comps.size} 個あります（単一メッシュではありません）`);
+  return { ok: errors.length === 0, errors, warnings, stats: {
+    vertices: usedV, triangles: nF, edges: edgeMap.size, boundary, nonManifold, inconsistent, nonManifoldVerts,
+    degenerate, duplicate, components: comps.size, euler: usedV - edgeMap.size + nF, volume,
+    size: [hi[0]-lo[0], hi[1]-lo[1], hi[2]-lo[2]] } };
+}
+
+/** バイナリSTL。アプリの Y-up を 3Dプリンタの Z-up に回転（(x,y,z)→(x,−z,y)、回転なので向きは保たれる）し、底面を z=0 に置く */
+function writeBinarySTL(pos, idx) {
+  const n = pos.length / 3, q = new Float64Array(pos.length);
+  let zmin = Infinity;
+  for (let i = 0; i < n; i++) {
+    q[i*3] = pos[i*3]; q[i*3+1] = -pos[i*3+2]; q[i*3+2] = pos[i*3+1];
+    zmin = Math.min(zmin, q[i*3+2]);
+  }
+  for (let i = 0; i < n; i++) q[i*3+2] -= zmin;
+  const nT = idx.length / 3, buf = new ArrayBuffer(84 + 50 * nT), dv = new DataView(buf);
+  const head = 'tesseract-vis STL (units: mm)';
+  for (let i = 0; i < head.length; i++) dv.setUint8(i, head.charCodeAt(i));
+  dv.setUint32(80, nT, true);
+  let o = 84;
+  for (let f = 0; f < nT; f++) {
+    const a = idx[f*3], b = idx[f*3+1], c = idx[f*3+2];
+    const ux = q[b*3]-q[a*3], uy = q[b*3+1]-q[a*3+1], uz = q[b*3+2]-q[a*3+2];
+    const wx = q[c*3]-q[a*3], wy = q[c*3+1]-q[a*3+1], wz = q[c*3+2]-q[a*3+2];
+    let nx = uy*wz-uz*wy, ny = uz*wx-ux*wz, nz = ux*wy-uy*wx;
+    const l = Math.hypot(nx, ny, nz) || 1; nx /= l; ny /= l; nz /= l;
+    for (const v of [nx, ny, nz]) { dv.setFloat32(o, v, true); o += 4; }
+    for (const p of [a, b, c]) for (let k = 0; k < 3; k++) { dv.setFloat32(o, q[p*3+k], true); o += 4; }
+    dv.setUint16(o, 0, true); o += 2;
+  }
+  return buf;
+}
+
+/* =====================================================================
+ *  Three.js 描画（3Dカメラの透視は 4D 投影とは無関係）
+ * ===================================================================== */
+const CELL_NAMES = ['+X胞','−X胞','+Y胞','−Y胞','+Z胞','−Z胞','+W胞','−W胞'];
+const CELL_COLORS = [0xe4572e, 0xf3a712, 0x59a14f, 0x17bebb, 0x4e79a7, 0xb07aa1, 0xe8d44d, 0x9c755f];
+const NEUTRAL = 0x9fb4c8;
+const EDGE_COLORS = { plus: 0x4da3ff, minus: 0xff9a3c, link: 0x9aa0a6 };
+
+/** 独立した renderer / scene / camera / OrbitControls を持つビューを作る */
+function makeView(el, camPos) {
+  const renderer = new THREE.WebGLRenderer({ antialias: true });
+  renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+  el.appendChild(renderer.domElement);
+  const scene = new THREE.Scene();
+  scene.background = new THREE.Color(0x14171c);
+  // 3D→2D のカメラは透視/正射影の2台を持ち、OrbitControls は1つを使い回す
+  const persp = new THREE.PerspectiveCamera(45, 1, 0.05, 200);
+  const ortho = new THREE.OrthographicCamera(-ORTHO_S, ORTHO_S, ORTHO_S, -ORTHO_S, -100, 500);
+  persp.position.set(...camPos);
+  scene.add(persp, ortho);
+  const camera = persp;
+  const controls = new OrbitControls(camera, renderer.domElement);
+  controls.enableDamping = true;
+  scene.add(new THREE.HemisphereLight(0xffffff, 0x404858, 0.8));
+  const headLight = new THREE.DirectionalLight(0xffffff, 1.4);   // カメラに追従
+  headLight.position.set(0.5, 1, 1);
+  persp.add(headLight);
+  const back = new THREE.DirectionalLight(0xffffff, 0.4);
+  back.position.set(-3, -2, -4);
+  scene.add(back);
+  scene.add(new THREE.AxesHelper(3));
+  const resize = () => {
+    const w = el.clientWidth, h = el.clientHeight;
+    if (!w || !h) return;
+    renderer.setSize(w, h, false);
+    const aspect = w / h;
+    persp.aspect = aspect; persp.updateProjectionMatrix();
+    // 正射影: 縦を固定、横をアスペクト比に合わせる（zoom=1 で縦 2·ORTHO_S）
+    ortho.left = -ORTHO_S * aspect; ortho.right = ORTHO_S * aspect;
+    ortho.top = ORTHO_S; ortho.bottom = -ORTHO_S; ortho.updateProjectionMatrix();
+  };
+  new ResizeObserver(resize).observe(el);
+  resize();
+  const V = { el, renderer, scene, camera, persp, ortho, controls, headLight };
+
+  // ViewHelper（CAD風の軸ギズモ）。公式アドオンは右下固定なので、専用の小さな透明canvasを
+  // ビュー右上に重ね、それを domElement として渡すことで右上に表示する。
+  const gc = document.createElement('canvas');
+  gc.className = 'gizmo';
+  el.appendChild(gc);
+  V.gizmoRenderer = new THREE.WebGLRenderer({ canvas: gc, alpha: true, antialias: true });
+  V.gizmoRenderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+  V.gizmoRenderer.setSize(128, 128, false);
+  V.gizmoCanvas = gc;
+  attachViewHelper(V);
+  // クリック（ドラッグ後のpointerupは除外）でギズモのハイライト軸の方向へカメラを移動
+  let down = null;
+  renderer.domElement.addEventListener('pointerdown', e => { down = [e.clientX, e.clientY]; });
+  renderer.domElement.addEventListener('pointerup', e => {
+    if (down && Math.hypot(e.clientX - down[0], e.clientY - down[1]) < 4) V.helper.handleClick(e);
+    down = null;
+  });
+  return V;
+}
+
+/** 現在のカメラに対する ViewHelper を作り直す（ViewHelper はカメラを生成時に束縛するため、カメラ切替時にも呼ぶ） */
+function attachViewHelper(V) {
+  if (V.helper) V.helper.dispose();
+  V.helper = new ViewHelper(V.camera, V.gizmoCanvas);
+  V.helper.center = V.controls.target;     // OrbitControls の注視点を中心に回り込む
+}
+
+const ORTHO_S = 5;   // 正射影カメラの zoom=1 での半高さ
+/** 3Dカメラを透視/正射影に切り替える。注視点・視線方向・視点回転・見かけの倍率を保つ。
+ *  見かけの倍率: 透視は注視点位置での可視半高さ dist·tan(fov/2)、正射影は ORTHO_S/zoom。両者を一致させる */
+function setCameraMode(V, useOrtho) {
+  const from = V.camera, to = useOrtho ? V.ortho : V.persp;
+  if (from === to) return;
+  const t = V.controls.target;
+  const off = from.position.clone().sub(t);
+  const th = Math.tan(THREE.MathUtils.degToRad(V.persp.fov / 2));
+  if (useOrtho) to.zoom = ORTHO_S / (off.length() * th);
+  else off.setLength((ORTHO_S / from.zoom) / th);       // 正射影のズームを透視の距離に換算
+  to.position.copy(t).add(off);
+  to.quaternion.copy(from.quaternion); to.up.copy(from.up);
+  to.add(V.headLight);                                  // ライトを新カメラへ付け替え
+  to.updateProjectionMatrix();
+  V.camera = to; V.controls.object = to;
+  attachViewHelper(V);
+  V.controls.update();
+}
+const sliceV = makeView(document.getElementById('pane-slice'), [4.2, 3.2, 5.2]);
+const projV = makeView(document.getElementById('pane-proj'), [6, 4.5, 8]);
+const printV = makeView(document.getElementById('pane-print'), [6, 4.5, 8]);
+
+/* ---------- Slice ビューの物体 ---------- */
+const meshMat = new THREE.MeshStandardMaterial({
+  vertexColors: true, roughness: 0.6, metalness: 0.05,
+  polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1
+});
+const wireMat = new THREE.MeshBasicMaterial({ color: 0xffffff, wireframe: true, transparent: true, opacity: 0.55 });
+const lineMat = new THREE.LineBasicMaterial({ color: 0x0b0d10 });
+const mesh = new THREE.Mesh(new THREE.BufferGeometry(), meshMat);
+const wire = new THREE.Mesh(mesh.geometry, wireMat);
+const lines = new THREE.LineSegments(new THREE.BufferGeometry(), lineMat);
+sliceV.scene.add(mesh, wire, lines);
+
+/* ---------- Projection ビューの物体: 16球 + 32円柱 + 断面オーバーレイ ---------- */
+const BOX_EDGES = boxEdges();
+const sphereGeo = new THREE.SphereGeometry(1, 16, 12);
+const cylGeo = new THREE.CylinderGeometry(1, 1, 1, 8);
+const edgeMats = {};
+for (const k of ['plus','minus','link','neutral'])
+  edgeMats[k] = new THREE.MeshStandardMaterial({ color: k === 'neutral' ? 0xcfd6de : EDGE_COLORS[k], roughness: 0.5 });
+const vertMats = { plus: new THREE.MeshStandardMaterial({ color: 0x4da3ff }), minus: new THREE.MeshStandardMaterial({ color: 0xff9a3c }),
+  neutral: new THREE.MeshStandardMaterial({ color: 0xffffff }) };
+const vertMeshes = Array.from({ length: 16 }, () => { const m = new THREE.Mesh(sphereGeo, vertMats.neutral); projV.scene.add(m); return m; });
+const edgeMeshes = BOX_EDGES.map(() => { const m = new THREE.Mesh(cylGeo, edgeMats.neutral); projV.scene.add(m); return m; });
+const ovMat = new THREE.MeshBasicMaterial({ color: 0x3ddc84, transparent: true, opacity: 0.35, side: THREE.DoubleSide, depthWrite: false });
+const ovMesh = new THREE.Mesh(new THREE.BufferGeometry(), ovMat);
+const ovLines = new THREE.LineSegments(new THREE.BufferGeometry(), new THREE.LineBasicMaterial({ color: 0x3ddc84 }));
+ovMesh.renderOrder = 2; ovLines.renderOrder = 3;
+projV.scene.add(ovMesh, ovLines);
+
+/** 断面（幾何結果）→ 配列。xform があれば各点に適用（4D投影の重ね描き用）。
+ *  面ごとに頂点を持たせ、フラットな法線を設定 */
+function buildGeometries(section, colorByCell, xform = null) {
+  const pos = [], nor = [], col = [], linePos = [];
+  const tmp = new THREE.Color();
+  for (const f of section.faces) {
+    tmp.setHex(colorByCell ? CELL_COLORS[f.cell] : NEUTRAL);
+    const pts = xform ? f.pts.map(xform) : f.pts;
+    // 凸多角形なので扇形三角形分割で十分
+    for (let i = 1; i < pts.length - 1; i++) {
+      for (const p of [pts[0], pts[i], pts[i+1]]) {
+        pos.push(p[0], p[1], p[2]); nor.push(f.u[0], f.u[1], f.u[2]); col.push(tmp.r, tmp.g, tmp.b);
+      }
+    }
+    for (let i = 0; i < pts.length; i++) {
+      const a = pts[i], b = pts[(i+1) % pts.length];
+      linePos.push(a[0], a[1], a[2], b[0], b[1], b[2]);
+    }
+  }
+  return { pos, nor, col, linePos };
+}
+function setAttr(geo, name, arr, size) {
+  geo.setAttribute(name, new THREE.Float32BufferAttribute(arr, size));
+}
+function replaceGeo(obj, geo) { obj.geometry.dispose(); obj.geometry = geo; }
+
+/** 2点間に細い円柱を配置（円柱は Y 軸方向の単位長さ） */
+const _up = new THREE.Vector3(0, 1, 0), _d = new THREE.Vector3();
+function placeCylinder(m, a, b, r) {
+  _d.set(b[0]-a[0], b[1]-a[1], b[2]-a[2]);
+  const len = _d.length();
+  if (len < 1e-6) { m.visible = false; return; }       // 直交投影で縮退した辺
+  m.visible = true;
+  m.position.set((a[0]+b[0])/2, (a[1]+b[1])/2, (a[2]+b[2])/2);
+  m.quaternion.setFromUnitVectors(_up, _d.multiplyScalar(1/len));
+  m.scale.set(r, len, r);
+}
+
+/* ---------- UI と状態 ---------- */
+const $ = id => document.getElementById(id);
+const DEFAULTS = { w: 0, xw: 0, yw: 0, zw: 0 };
+const ORTHO = [1.2, 0.8, 1.5, 0.6];
+const state = { ...DEFAULTS, H: [1, 1, 1, 1], shape: 'tesseract', mode: 'proj', ptype: 'persp', D: 4,
+  wmax: 1, playing: false, dir: 1, preview: false };
+const MODE_NOTES = {
+  slice: '4次元回転後の物体を w = w₀ で切った3次元断面。',
+  proj: '16頂点・32辺を4次元から3次元へ投影。断面位置 w は影響しません。',
+  cmp: '左: 投影 / 右: 断面。同じ寸法・4D回転を共有し、左の緑の半透明メッシュが切断位置（w₀）を示します。'
+};
+
+$('legend').innerHTML = CELL_NAMES.map((n, i) =>
+  `<div><span class="sw" style="background:#${CELL_COLORS[i].toString(16).padStart(6,'0')}"></span>${n}</div>`).join('');
+
+function updateSlice(sec) {
+  const g = buildGeometries(sec, $('c-cell').checked);
+  const geo = new THREE.BufferGeometry();
+  setAttr(geo, 'position', g.pos, 3); setAttr(geo, 'normal', g.nor, 3); setAttr(geo, 'color', g.col, 3);
+  mesh.geometry.dispose(); mesh.geometry = wire.geometry = geo;
+  const lg = new THREE.BufferGeometry(); setAttr(lg, 'position', g.linePos, 3);
+  replaceGeo(lines, lg);
+  const empty = sec.empty;
+  mesh.visible = !empty; wire.visible = !empty && $('c-wire').checked; lines.visible = !empty && $('c-edge').checked;
+}
+
+function updateProjection(R, sec) {
+  const persp = state.ptype === 'persp';
+  const P = boxVertices(state.H).map(v => project4D(rotate4(R, v), state.D, persp));
+  const ecol = $('c-ecol').checked;
+  vertMeshes.forEach((m, i) => {
+    m.position.set(P[i][0], P[i][1], P[i][2]);
+    m.scale.setScalar(0.07);
+    m.visible = $('c-verts').checked;
+    m.material = ecol ? ((i >> 3 & 1) ? vertMats.plus : vertMats.minus) : vertMats.neutral;
+  });
+  BOX_EDGES.forEach((e, n) => {
+    placeCylinder(edgeMeshes[n], P[e.i], P[e.j], 0.025);
+    edgeMeshes[n].material = ecol ? edgeMats[e.kind] : edgeMats.neutral;
+  });
+  // 断面オーバーレイ: 断面頂点 (x,y,z,w0) を同じ4D投影で写す
+  const show = state.mode === 'cmp' && !sec.empty;
+  ovMesh.visible = ovLines.visible = show;
+  if (show) {
+    const g = buildGeometries(sec, false, p => project4D([p[0], p[1], p[2], state.w], state.D, persp));
+    const geo = new THREE.BufferGeometry(); setAttr(geo, 'position', g.pos, 3);
+    replaceGeo(ovMesh, geo);
+    const lg = new THREE.BufferGeometry(); setAttr(lg, 'position', g.linePos, 3);
+    replaceGeo(ovLines, lg);
+  }
+}
+
+let last = null;
+function update() {
+  const R = rotationMatrix(state.xw*Math.PI/180, state.yw*Math.PI/180, state.zw*Math.PI/180);
+  // 断面位置の範囲を回転後16頂点の W 座標の最小・最大に合わせる
+  state.wmax = wExtent(R, state.H);
+  state.w = Math.max(-state.wmax, Math.min(state.wmax, state.w));
+  $('s-w').min = -state.wmax; $('s-w').max = state.wmax; $('s-w').value = state.w;
+  // 透視投影では全頂点で D > w′ が必要なので、D の下限を w′ の最大値より余裕をもたせる
+  const Dmin = Math.ceil((state.wmax + 0.5) * 100) / 100;
+  $('s-D').min = Dmin;
+  if (state.D < Dmin) state.D = Dmin;
+  $('s-D').value = state.D;
+
+  const sec = computeSection(R, state.w, state.H);
+  last = sec;
+  updateSlice(sec);
+  updateProjection(R, sec);
+
+  // ----- パネル表示 -----
+  const m = state.mode;
+  sliceV.el.hidden = m === 'proj'; projV.el.hidden = m === 'slice'; printV.el.hidden = !state.preview;
+  for (const [id, k] of [['m-slice','slice'],['m-proj','proj'],['m-cmp','cmp']]) $(id).classList.toggle('active', m === k);
+  $('mode-note').textContent = MODE_NOTES[m];
+  for (const id of ['h-w','row-w','row-speed','b-play']) $(id).hidden = m === 'proj';
+  $('sec-proj').hidden = m === 'slice'; $('info-proj').hidden = m === 'slice'; $('info-slice').hidden = m === 'proj';
+  $('s-D').disabled = state.ptype === 'ortho';
+  $('o-D').textContent = state.D.toFixed(2);
+  $('p-type').textContent = state.ptype === 'persp' ? '透視' : '直交';
+  $('p-D').textContent = state.ptype === 'persp' ? state.D.toFixed(2) : '—';
+  $('p-w').textContent = `[${(-state.wmax).toFixed(2)}, ${state.wmax.toFixed(2)}]`;
+  $('o-rotspeed').textContent = $('s-rotspeed').value;
+
+  $('o-w').textContent = state.w.toFixed(2) + `  [${(-state.wmax).toFixed(2)}, ${state.wmax.toFixed(2)}]`;
+  ['a','b','c','d'].forEach((n, i) => { $('o-h'+n).textContent = state.H[i].toFixed(2); $('s-h'+n).value = state.H[i]; $('s-h'+n).disabled = state.shape === 'tesseract'; });
+  $('o-xw').textContent = state.xw + '°'; $('o-yw').textContent = state.yw + '°'; $('o-zw').textContent = state.zw + '°';
+  $('o-speed').textContent = (+$('s-speed').value).toFixed(2);
+  $('i-w').textContent = state.w.toFixed(3);
+  $('i-ang').textContent = `${Math.round(state.xw)}° / ${Math.round(state.yw)}° / ${Math.round(state.zw)}°`;
+  const empty = sec.empty;
+  $('i-v').textContent = empty ? 0 : sec.vertices.length;
+  $('i-e').textContent = empty ? 0 : sec.edges;
+  $('i-f').textContent = empty ? 0 : sec.faces.length;
+  $('i-vol').textContent = empty ? '0' : sec.volume.toFixed(4);
+  $('i-st').textContent = empty ? '空' : '凸多面体';
+  const em = $('empty');
+  em.style.display = empty ? 'flex' : 'none';
+  em.textContent = sec.reason;
+}
+
+function syncSliders() {
+  $('s-w').value = state.w; $('s-xw').value = state.xw; $('s-yw').value = state.yw; $('s-zw').value = state.zw;
+}
+for (const k of ['w','xw','yw','zw']) {
+  $('s-'+k).addEventListener('input', e => { state[k] = +e.target.value; update(); });
+}
+['a','b','c','d'].forEach((n, i) => $('s-h'+n).addEventListener('input', e => { state.H[i] = +e.target.value; update(); }));
+$('b-tess').onclick = () => { state.shape = 'tesseract'; state.H = [1,1,1,1]; update(); };
+$('b-orth').onclick = () => { state.shape = 'orthotope'; state.H = ORTHO.slice(); update(); };
+$('m-slice').onclick = () => { state.mode = 'slice'; $('s-etarget').value = 'slice'; $('s-etarget').dispatchEvent(new Event('input')); update(); };
+$('m-proj').onclick = () => { state.mode = 'proj'; setPlaying(false); $('s-etarget').value = 'proj'; $('s-etarget').dispatchEvent(new Event('input')); update(); };
+$('m-cmp').onclick = () => { state.mode = 'cmp'; update(); };
+$('s-ptype').addEventListener('input', e => { state.ptype = e.target.value; update(); });
+$('s-ctype').addEventListener('input', e => { for (const V of [sliceV, projV, printV]) setCameraMode(V, e.target.value === 'ortho'); });
+$('s-D').addEventListener('input', e => { state.D = +e.target.value; update(); });
+for (const id of ['s-speed','s-rotspeed','c-cell','c-edge','c-wire','c-verts','c-ecol']) $(id).addEventListener('input', update);
+function setPlaying(p) { state.playing = p; $('b-play').textContent = p ? '■ 停止' : '▶ 自動往復'; }
+$('b-play').onclick = () => setPlaying(!state.playing);
+$('b-reset').onclick = () => { Object.assign(state, DEFAULTS); setPlaying(false); $('c-rotanim').checked = false; state.dir = 1; syncSliders(); update(); };
+$('b-norot').onclick = () => { state.xw = state.yw = state.zw = 0; syncSliders(); update(); };
+
+/* ---------- STL エクスポート / 印刷用プレビュー ---------- */
+const printMat = new THREE.MeshStandardMaterial({ color: 0xc8d3e0, roughness: 0.55, metalness: 0.1 });
+const printMesh = new THREE.Mesh(new THREE.BufferGeometry(), printMat);
+printV.scene.add(printMesh);
+let printModel = null;
+
+function currentRotation() {
+  return rotationMatrix(state.xw*Math.PI/180, state.yw*Math.PI/180, state.zw*Math.PI/180);
+}
+/** 現在の状態（4D回転・寸法・w・4D→3D投影）から印刷モデルを作る。3Dカメラは参照しない */
+function buildPrintModel(target) {
+  const size = +$('n-size').value, rodD = +$('n-rod').value, jointD = +$('n-joint').value;
+  if (!(size >= 10 && size <= 500)) throw new Error('造形サイズは 10〜500 mm で指定してください');
+  const R = currentRotation();
+  if (target === 'slice') {
+    return { target, ...buildSliceMesh(computeSection(R, state.w, state.H), size) };
+  }
+  if (!(rodD >= 0.4 && jointD >= 0.4)) throw new Error('ロッド・ジョイント直径は 0.4 mm 以上にしてください');
+  const persp = state.ptype === 'persp';
+  const P = boxVertices(state.H).map(v => project4D(rotate4(R, v), state.D, persp));
+  return { target, ...buildProjectionMesh(P, boxEdges(), size, rodD, jointD) };
+}
+
+function showPreview(model) {
+  const { pos, idx } = model;
+  let m = 0; for (let i = 0; i < pos.length; i++) m = Math.max(m, Math.abs(pos[i]));
+  const k = 3.5 / (m || 1);                              // 表示用に ±3.5 へ正規化
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(Float32Array.from(pos, v => v * k), 3));
+  geo.setIndex(new THREE.BufferAttribute(idx, 1));
+  geo.computeVertexNormals();
+  printMat.flatShading = model.target === 'slice';
+  printMat.needsUpdate = true;
+  printMesh.geometry.dispose(); printMesh.geometry = geo;
+  state.preview = true; update();
+}
+
+function reportText(model, v) {
+  const s = v.stats, f = x => x.toFixed(2);
+  const lines = [
+    `対象: ${model.target === 'slice' ? 'Slice（断面）' : 'Projection（投影）'}`,
+    `外形: ${f(s.size[0])} × ${f(s.size[1])} × ${f(s.size[2])} mm`,
+    `頂点 ${s.vertices} / 辺 ${s.edges} / 三角形 ${s.triangles}`,
+    `体積: ${f(s.volume)} mm³　オイラー数 ${s.euler}　連結成分 ${s.components}`,
+    `境界辺 ${s.boundary} / 非多様体辺 ${s.nonManifold} / 向き不整合 ${s.inconsistent} / 非多様体頂点 ${s.nonManifoldVerts}`,
+    `退化三角形 ${s.degenerate} / 重複三角形 ${s.duplicate}`
+  ];
+  if (model.info && model.info.voxel) lines.push(`ボクセル幅 ${f(model.info.voxel)} mm（格子 ${model.info.grid.join('×')}）`);
+  lines.push(v.ok ? '判定: OK（水密・多様体・法線整合）' : '判定: NG');
+  for (const e of v.errors) lines.push('✗ ' + e);
+  for (const w of [...v.warnings, ...(model.info.warn || [])]) lines.push('△ ' + w);
+  return lines.join('\n');
+}
+
+/** 生成 → 検証 → プレビュー表示。download=true なら検証OKのときだけSTLを保存 */
+async function runExport(download) {
+  const status = $('e-report');
+  status.textContent = '生成中…（Projection は数秒かかることがあります）';
+  for (const id of ['b-preview', 'b-export']) $(id).disabled = true;
+  await new Promise(r => setTimeout(r, 30));
+  try {
+    const model = buildPrintModel($('s-etarget').value);
+    const v = validateMesh(model.pos, model.idx);
+    printModel = { model, v };
+    status.textContent = reportText(model, v);
+    showPreview(model);
+    if (download) {
+      if (!v.ok) { status.textContent += '\n→ 検証に失敗したため STL は保存しませんでした'; }
+      else {
+        const blob = new Blob([writeBinarySTL(model.pos, model.idx)], { type: 'model/stl' });
+        const a = document.createElement('a');
+        const tag = model.target === 'slice' ? `slice_w${state.w.toFixed(2)}` : 'projection';
+        a.href = URL.createObjectURL(blob);
+        a.download = `${state.shape}_${tag}_${$('n-size').value}mm.stl`;
+        a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+        status.textContent += `\n→ ${a.download} を保存しました（${(blob.size/1e6).toFixed(2)} MB）`;
+      }
+    }
+    return printModel;
+  } catch (err) {
+    status.textContent = 'エラー: ' + err.message;
+  } finally {
+    for (const id of ['b-preview', 'b-export']) $(id).disabled = false;
+  }
+}
+$('b-preview').onclick = () => runExport(false);
+$('b-export').onclick = () => runExport(true);
+$('b-pclose').onclick = () => { state.preview = false; update(); };
+$('s-etarget').addEventListener('input', () => {
+  const proj = $('s-etarget').value === 'proj';
+  for (const id of ['n-rod', 'n-joint']) $(id).disabled = !proj;
+});
+$('s-etarget').dispatchEvent(new Event('input'));
+
+const wrap180 = a => ((a + 180) % 360 + 360) % 360 - 180;
+let prev = performance.now();
+function loop(now) {
+  const dt = Math.min((now - prev) / 1000, 0.1); prev = now;
+  let dirty = false;
+  if (state.playing && state.mode !== 'proj') {          // w を [-wmax, wmax] で等速往復
+    state.w += state.dir * (+$('s-speed').value) * dt;
+    if (state.w >= state.wmax) { state.w = state.wmax; state.dir = -1; }
+    if (state.w <= -state.wmax) { state.w = -state.wmax; state.dir = 1; }
+    state.w = Math.round(state.w * 1e6) / 1e6;
+    dirty = true;
+  }
+  if ($('c-rotanim').checked) {                           // 4D回転の自動アニメーション（各平面で速度を変える）
+    const v = +$('s-rotspeed').value * dt;
+    state.xw = wrap180(state.xw + v); state.yw = wrap180(state.yw + 0.7 * v); state.zw = wrap180(state.zw + 0.45 * v);
+    dirty = true;
+  }
+  if (dirty) { syncSliders(); update(); }
+  for (const V of [sliceV, projV, printV]) {
+    if (V.el.hidden) continue;
+    if (V.helper.animating) V.helper.update(dt);   // ギズモクリック後のカメラ移動アニメーション
+    V.controls.update();
+    V.renderer.render(V.scene, V.camera);
+    V.helper.render(V.gizmoRenderer);
+  }
+  requestAnimationFrame(loop);
+}
+syncSliders(); update();
+requestAnimationFrame(loop);
+
+// 検証用に公開
+window.TV = { computeSection, rotationMatrix, edgeIntersectionCount, wExtent, boxVertices, boxEdges, rotate4, project4D,
+  state, update, syncSliders, setCameraMode, buildSliceMesh, buildProjectionMesh, validateMesh, writeBinarySTL, buildPrintModel, runExport, printV, mesh, lines, vertMeshes, edgeMeshes, ovMesh, projV, sliceV,
+  get last() { return last; } };
+</script>
+</body>
+</html>
